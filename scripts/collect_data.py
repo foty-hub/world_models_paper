@@ -1,3 +1,4 @@
+import argparse
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -156,7 +157,19 @@ def collect_data(root: Path = ROOT, num_envs: int = N, total_timesteps: int = T)
 
 
 def main():
-    collect_data()
+    parser = argparse.ArgumentParser(
+        description=f"Collect random-policy rollouts from {ENV_ID}."
+    )
+    parser.add_argument(
+        "--total-timesteps",
+        "-t",
+        type=int,
+        default=T,
+        help=f"Total number of timesteps to collect. Must be divisible by {N}.",
+    )
+    args = parser.parse_args()
+
+    collect_data(total_timesteps=args.total_timesteps)
 
 
 if __name__ == "__main__":
