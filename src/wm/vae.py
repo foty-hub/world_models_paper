@@ -27,14 +27,14 @@ class Encoder(nnx.Module):
         x = self.dense(x)
 
         # now we have a [32mu, 32sigma] vector -> convert to a latent
-        mu, log_var = jnp.split(x, 2, axis=-1)
-        sigma = jnp.exp(0.5 * log_var)  # ensure the standard deviation is positive
+        mu, logvar = jnp.split(x, 2, axis=-1)
+        sigma = jnp.exp(0.5 * logvar)  # ensure the standard deviation is positive
 
         # construct the latent vector as z = mu + sigma * N(0, 1)
         eps = self.rngs.normal(mu.shape, dtype=mu.dtype)
 
         # return everything so we can compute the KL divergence
-        return {"mu": mu, "sigma": sigma, "z": mu + sigma * eps}
+        return {"mu": mu, "logvar": logvar, "z": mu + sigma * eps}
 
 
 class Decoder(nnx.Module):
@@ -42,6 +42,7 @@ class Decoder(nnx.Module):
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
         self.dense = nnx.Linear(self.latent_dim, 1024, rngs=self.rngs)
+        self.logsigma = nnx.Param(jnp.array(0.0))  # scalar sigma parameter
         # fmt: off
         self.deconv1 = nnx.ConvTranspose(1024, 128, (5, 5), strides=2, padding="VALID", rngs=rngs)
         self.deconv2 = nnx.ConvTranspose( 128,  64, (5, 5), strides=2, padding="VALID", rngs=rngs)
@@ -60,13 +61,22 @@ class Decoder(nnx.Module):
 
 
 class VAE(nnx.Module):
-    def __init__(self, latent_dim: int, rngs: nnx.Rngs):
+    def __init__(self, latent_dim: int, rngs: nnx.Rngs) -> None:
         self.rngs = rngs
         self.encoder = Encoder(latent_dim, self.rngs)
         self.decoder = Decoder(latent_dim, self.rngs)
 
-    def encode(self, x):
+    def encode(self, x: Shaped[Array, "... H W C"]) -> dict[str, Array]:
         return self.encoder(x)
 
-    def decode(self, z):
+    def decode(self, z: Shaped[Array, "... LatentDim"]) -> Shaped[Array, "... H W C"]:
         return self.decoder(z)
+
+    @nnx.jit
+    def __call__(self, x: Shaped[Array, "... H W C"]) -> Shaped[Array, "... H W C"]:
+        mu, logvar, z = self.encode(x).values()
+        return self.decode(z)
+
+    @property
+    def sigma(self):
+        return jnp.exp(self.decoder.logsigma)
