@@ -162,27 +162,27 @@ def checkpoint_model(
     _, optim_state = nnx.split(optim)
     checkpoint_manager.save(
         step,
-        args=ocp.args.Composite(
-            model=ocp.args.StandardSave(model_state),
-            optim=ocp.args.StandardSave(optim_state),
-        ),
+        args=ocp.args.StandardSave({"model": model_state, "optim": optim_state}),
     )
-
-
-def is_legacy_model_checkpoint(run_dir: Path, step: int) -> bool:
-    return (run_dir / str(step) / "default").exists()
 
 
 def restore_checkpoint(
     model: nnx.Module,
     optim: nnx.Optimizer,
     checkpoint_manager: ocp.CheckpointManager,
-    run_dir: Path,
     step: int,
 ) -> bool:
     _, model_state = nnx.split(model)
+    _, optim_state = nnx.split(optim)
 
-    if is_legacy_model_checkpoint(run_dir, step):
+    try:
+        restored = checkpoint_manager.restore(
+            step,
+            args=ocp.args.StandardRestore(
+                {"model": model_state, "optim": optim_state}
+            ),
+        )
+    except Exception:
         restored_model = checkpoint_manager.restore(
             step,
             args=ocp.args.StandardRestore(model_state),
@@ -190,14 +190,6 @@ def restore_checkpoint(
         nnx.update(model, restored_model)
         return False
 
-    _, optim_state = nnx.split(optim)
-    restored = checkpoint_manager.restore(
-        step,
-        args=ocp.args.Composite(
-            model=ocp.args.StandardRestore(model_state),
-            optim=ocp.args.StandardRestore(optim_state),
-        ),
-    )
     nnx.update(model, restored["model"])
     nnx.update(optim, restored["optim"])
     return True
@@ -275,7 +267,6 @@ def main(
                 model,
                 optim,
                 checkpoint_manager,
-                run_dir,
                 latest_step,
             )
             msg = f"Restored checkpoint at step {latest_step}"
