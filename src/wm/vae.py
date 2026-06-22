@@ -42,7 +42,8 @@ class Decoder(nnx.Module):
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
         self.dense = nnx.Linear(self.latent_dim, 1024, rngs=self.rngs)
-        self.logsigma = nnx.Param(jnp.array(0.0))  # scalar sigma parameter
+        # self.logsigma = nnx.Param(jnp.array(0.0))  # scalar sigma parameter
+        self.logsigma = jnp.array(0.0)  # fixed scalar sigma
         # fmt: off
         self.deconv1 = nnx.ConvTranspose(1024, 128, (5, 5), strides=2, padding="VALID", rngs=rngs)
         self.deconv2 = nnx.ConvTranspose( 128,  64, (5, 5), strides=2, padding="VALID", rngs=rngs)
