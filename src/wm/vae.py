@@ -1,7 +1,15 @@
 import einops
 import jax.numpy as jnp
+from chex import dataclass
 from flax import nnx
 from jaxtyping import Array, Shaped
+
+
+@dataclass
+class LatentDict:
+    mu: Shaped[Array, "... LatentDim"]
+    logvar: Shaped[Array, "... LatentDim"]
+    z: Shaped[Array, "... LatentDim"]
 
 
 # TODO: x inputs are uint8 - does that cause any issues?
@@ -17,7 +25,7 @@ class Encoder(nnx.Module):
         # fmt: on
         self.dense = nnx.Linear(1024, self.latent_dim * 2, rngs=self.rngs)
 
-    def __call__(self, x: Shaped[Array, "... H W C"]) -> Shaped[Array, "... LatentDim"]:
+    def __call__(self, x: Shaped[Array, "... H W C"]) -> LatentDict:
         "Batch-friendly encoder method."
         x = nnx.relu(self.conv1(x))
         x = nnx.relu(self.conv2(x))
@@ -34,7 +42,7 @@ class Encoder(nnx.Module):
         eps = self.rngs.normal(mu.shape, dtype=mu.dtype)
 
         # return everything so we can compute the KL divergence
-        return {"mu": mu, "logvar": logvar, "z": mu + sigma * eps}
+        return LatentDict(mu=mu, logvar=logvar, z=mu + sigma * eps)
 
 
 class Decoder(nnx.Module):
@@ -67,7 +75,7 @@ class VAE(nnx.Module):
         self.encoder = Encoder(latent_dim, self.rngs)
         self.decoder = Decoder(latent_dim, self.rngs)
 
-    def encode(self, x: Shaped[Array, "... H W C"]) -> dict[str, Array]:
+    def encode(self, x: Shaped[Array, "... H W C"]) -> LatentDict:
         return self.encoder(x)
 
     def decode(self, z: Shaped[Array, "... LatentDim"]) -> Shaped[Array, "... H W C"]:
@@ -75,7 +83,7 @@ class VAE(nnx.Module):
 
     @nnx.jit
     def __call__(self, x: Shaped[Array, "... H W C"]) -> Shaped[Array, "... H W C"]:
-        mu, logvar, z = self.encode(x).values()
+        z = self.encode(x).z
         return self.decode(z)
 
     @property

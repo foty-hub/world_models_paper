@@ -49,7 +49,9 @@ def plot_reconstruction(
 
 @nnx.value_and_grad(has_aux=True)
 def loss_fn(model: VAE, x: Shaped[Array, "B H W C"]) -> Shaped[Array, ""]:
-    mu, logvar, z = model.encode(x).values()
+    latent_dict = model.encode(x)
+    mu, logvar, z = latent_dict.to_tuple()
+
     x_pred = model.decode(z)
 
     decoder_sigma = model.sigma
@@ -178,9 +180,7 @@ def restore_checkpoint(
     try:
         restored = checkpoint_manager.restore(
             step,
-            args=ocp.args.StandardRestore(
-                {"model": model_state, "optim": optim_state}
-            ),
+            args=ocp.args.StandardRestore({"model": model_state, "optim": optim_state}),
         )
     except Exception:
         restored_model = checkpoint_manager.restore(
