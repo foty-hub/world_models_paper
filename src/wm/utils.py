@@ -7,6 +7,7 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from PIL import Image
 
+from wm.rnn import MDNRNN
 from wm.vae import VAE
 
 
@@ -21,6 +22,33 @@ def save_model(model: nnx.Module, model_name: str) -> None:
     fp = ckpt_dir / model_name
     checkpointer.save(fp, state)
     print(f"Saved model to {fp}")
+
+
+def load_rnn(
+    model_name: str,
+    latent_dim: int = 32,
+    action_dim: int = 3,
+    n_mixtures: int = 5,
+    hidden_units: int = 256,
+    seed: int = 0,
+) -> MDNRNN:
+    model = MDNRNN(
+        latent_dim,
+        action_dim,
+        n_mixtures=n_mixtures,
+        hidden_units=hidden_units,
+        rngs=nnx.Rngs(seed),
+    )
+    _, state = nnx.split(model)
+
+    checkpointer = ocp.StandardCheckpointer()
+    state = checkpointer.restore(Path(model_name).resolve(), target=state)
+    nnx.update(model, state)
+    return model
+
+
+def load_rnn_checkpoint(model_name: str, **kwargs) -> MDNRNN:
+    return load_rnn(model_name, **kwargs)
 
 
 def load_vae_checkpoint(run_dir, step=None):
