@@ -65,7 +65,7 @@ def collect_data(root: Path = ROOT, num_envs: int = N, total_timesteps: int = T)
                 "dtype": "uint8",
                 "preprocessing": "crop rows [0:84] (status bar), resize",
             },
-            "act": {"shape": list(act_shape), "dtype": "float32"},
+            "act": {"shape": list(act_shape), "dtype": "float32"},  # type: ignore
             "started_at": datetime.now(timezone.utc).isoformat(),
         }
 
@@ -74,7 +74,7 @@ def collect_data(root: Path = ROOT, num_envs: int = N, total_timesteps: int = T)
 
         # fmt: off
         obs   = np.lib.format.open_memmap(run_dir /   "obs.npy", mode="w+", dtype=np.uint8,   shape=(total_timesteps, *proc_shape))
-        acts  = np.lib.format.open_memmap(run_dir /  "acts.npy", mode="w+", dtype=np.float32, shape=(total_timesteps, *act_shape))
+        acts  = np.lib.format.open_memmap(run_dir /  "acts.npy", mode="w+", dtype=np.float32, shape=(total_timesteps, *act_shape)) # type: ignore
         rews  = np.lib.format.open_memmap(run_dir /  "rews.npy", mode="w+", dtype=np.float32, shape=(total_timesteps,))
         dones = np.lib.format.open_memmap(run_dir / "dones.npy", mode="w+", dtype=bool,       shape=(total_timesteps,))
         # fmt: on

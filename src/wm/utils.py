@@ -51,7 +51,7 @@ def load_rnn_checkpoint(model_name: str, **kwargs) -> MDNRNN:
     return load_rnn(model_name, **kwargs)
 
 
-def load_vae_checkpoint(run_dir, step=None):
+def load_vae(run_dir, step=None):
     run_dir = Path(run_dir).resolve()
 
     with (run_dir / "config.json").open() as f:
