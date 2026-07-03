@@ -1,18 +1,19 @@
 import json
 from pathlib import Path
 
+import cv2
 import numpy as np
 import optax
 import orbax.checkpoint as ocp
 from flax import nnx
-from PIL import Image
 
 from wm.rnn import MDNRNN
 from wm.vae import VAE
 
 
-def resize_img(image, shape: tuple[int, int] = (64, 64)):
-    return np.asarray(Image.fromarray(image).resize(shape, Image.Resampling.BILINEAR))
+def prep_obs(state):
+    cropped = state[..., :84, :, :]
+    return np.array([cv2.resize(i, (64, 64)) for i in cropped])
 
 
 def save_model(model: nnx.Module, model_name: str) -> None:
@@ -30,14 +31,15 @@ def load_rnn(
     action_dim: int = 3,
     n_mixtures: int = 5,
     hidden_units: int = 256,
-    seed: int = 0,
+    rngs: nnx.Rngs | None = None,
 ) -> MDNRNN:
+    rngs = rngs if rngs else nnx.Rngs(0)
     model = MDNRNN(
         latent_dim,
         action_dim,
         n_mixtures=n_mixtures,
         hidden_units=hidden_units,
-        rngs=nnx.Rngs(seed),
+        rngs=rngs,
     )
     _, state = nnx.split(model)
 
@@ -47,11 +49,7 @@ def load_rnn(
     return model
 
 
-def load_rnn_checkpoint(model_name: str, **kwargs) -> MDNRNN:
-    return load_rnn(model_name, **kwargs)
-
-
-def load_vae(run_dir, step=None):
+def load_vae(run_dir, step=None, rngs: nnx.Rngs | None = None):
     run_dir = Path(run_dir).resolve()
 
     with (run_dir / "config.json").open() as f:
@@ -60,7 +58,8 @@ def load_vae(run_dir, step=None):
     latent_dim = cfg["latent_dim"]
     seed = cfg["seed"]
 
-    model = VAE(latent_dim=latent_dim, rngs=nnx.Rngs(seed))
+    rngs = rngs if rngs else nnx.Rngs(seed)
+    model = VAE(latent_dim=latent_dim, rngs=rngs)
     _, model_state = nnx.split(model)
 
     with ocp.CheckpointManager(run_dir) as manager:
