@@ -1,176 +1,91 @@
-import argparse
-import time
-from datetime import datetime, timezone
 from pathlib import Path
+import tyro
 
 import gymnasium as gym
 import numpy as np
-import yaml
-from tqdm import tqdm
+import zarr
+from flax import nnx
+from tqdm import tqdm, trange
 
-from wm.utils import resize_img
+from wm import Agent
+from wm.utils import prep_obs
 
-ROOT = (Path(__file__).resolve().parents[1] / "data").resolve()
+ROOT_DIR = Path(__file__).resolve().parent.parent
 ENV_ID = "CarRacing-v3"
-
-N = 8  # parallel envs
-T = 100_000  # total timesteps; make divisible by N
+NUM_ROLLOUTS = 10_000
 
 
-def write_meta(run_dir: Path, d):
-    with open(run_dir / "meta.yaml", "w") as f:
-        yaml.safe_dump(d, f, sort_keys=False)
+def create_or_read_datastore(data_path: Path) -> tuple[zarr.Array, zarr.Array]:
+    if data_path.exists():
+        print(f"Opening existing datastore at {data_path}")
+        z = zarr.open_group(store=data_path)
+        obs: zarr.Array = z["obs"]  # type:ignore
+        act: zarr.Array = z["act"]  # type:ignore
+    else:
+        print(f"Creating new datastore at {data_path}")
+        z = zarr.create_group(store=data_path, overwrite=True)
+        obs = z.create_array("obs", shape=(0, 1001, 64, 64, 3), dtype=np.uint8)
+        act = z.create_array("act", shape=(0, 1000, 3), dtype=np.float32)
+
+    return obs, act
 
 
-def prep_obs(state):
-    return np.asarray(resize_img(state[:84]), dtype=np.uint8)  # crop status bar
+# Continuously loop until we've collected enough rollouts:
+#   1. Instantiate a new agent with a random seed
+#   2. Roll it out across a series of batched episodes
+#   3. Save the data.
+#   4. Repeat
+def collect_rollout(num_envs, seed):
+    try:
+        agent = Agent(rngs=nnx.Rngs(seed))
+        envs = gym.make_vec(id=ENV_ID, num_envs=num_envs, vectorization_mode="async")
+        states, _ = envs.reset(seed=seed)
+        o = prep_obs(states)  # TODO: redo this looping implementation
+        # Instantiate data containers for a give rollout - which we'll then append to our
+        # persistent data store
+        rollout_obs = np.zeros(shape=(num_envs, 1001, 64, 64, 3), dtype=np.uint8)
+        rollout_act = np.zeros(shape=(num_envs, 1000, 3), dtype=np.float32)
+        rollout_obs[:, 0] = o
 
+        carry = agent.initialize_carry(num_envs)
 
-def collect_data(root: Path = ROOT, num_envs: int = N, total_timesteps: int = T):
-    if total_timesteps % num_envs != 0:
-        raise ValueError("total_timesteps must be divisible by num_envs")
+        for t in trange(1000, desc="Steps", position=1, leave=False):
+            a, carry = agent(o, carry)  # type: ignore
+            states, rewards, truncateds, terminateds, infos = envs.step(np.array(a))
+            o = prep_obs(states)
 
-    root.mkdir(parents=True, exist_ok=True)
-    run_idx = len(list(root.glob("run_*")))
-    run_dir = (root / f"run_{run_idx:04d}").resolve()
-    run_dir.mkdir()
-    print(f"Writing to {run_dir}")
-
-    seg = total_timesteps // num_envs
-    envs = gym.make_vec(ENV_ID, num_envs=num_envs, vectorization_mode="async")
-
-    try:  # in a try-finally to close the envs.
-        # Vec env distributes seeds like n, n+1, n+2, so advance by the
-        # previous run's env count to avoid overlap.
-        if run_idx == 0:
-            seed = 0
-        else:
-            with open(root / f"run_{run_idx - 1:04d}" / "meta.yaml") as f:
-                prev_meta = yaml.safe_load(f)
-            seed = prev_meta["seed"] + prev_meta["num_envs"]
-
-        o_batch, _ = envs.reset(seed=seed)
-        proc_shape = prep_obs(o_batch[0]).shape
-        act_shape = envs.single_action_space.shape
-
-        meta = {
-            "complete": False,
-            "env_id": ENV_ID,
-            "num_envs": num_envs,
-            "total_timesteps": total_timesteps,
-            "policy": "random",  # update when you swap in a real policy
-            "seed": seed,
-            "obs": {
-                "shape": list(proc_shape),
-                "dtype": "uint8",
-                "preprocessing": "crop rows [0:84] (status bar), resize",
-            },
-            "act": {"shape": list(act_shape), "dtype": "float32"},  # type: ignore
-            "started_at": datetime.now(timezone.utc).isoformat(),
-        }
-
-        write_meta(run_dir, meta)  # exists from the start, marked incomplete
-        t0 = time.time()
-
-        # fmt: off
-        obs   = np.lib.format.open_memmap(run_dir /   "obs.npy", mode="w+", dtype=np.uint8,   shape=(total_timesteps, *proc_shape))
-        acts  = np.lib.format.open_memmap(run_dir /  "acts.npy", mode="w+", dtype=np.float32, shape=(total_timesteps, *act_shape)) # type: ignore
-        rews  = np.lib.format.open_memmap(run_dir /  "rews.npy", mode="w+", dtype=np.float32, shape=(total_timesteps,))
-        dones = np.lib.format.open_memmap(run_dir / "dones.npy", mode="w+", dtype=bool,       shape=(total_timesteps,))
-        # fmt: on
-
-        cursor = np.arange(num_envs) * seg  # per-env write position
-        seg_end = cursor + seg
-        ep_starts = [[c] for c in cursor]  # first episode of each segment
-        prev_done = np.zeros(num_envs, dtype=bool)
-
-        with tqdm(total=total_timesteps) as pbar:
-            while (cursor < seg_end).any():
-                a = envs.action_space.sample()  # sample random action
-                o_next, r, term, trunc, _ = envs.step(a)
-                done = term | trunc
-
-                for j in range(num_envs):
-                    if cursor[j] >= seg_end[j]:
-                        continue  # this env's segment is full; keep stepping, discard
-                    if prev_done[j]:
-                        # autoreset step: o_batch[j] was the final obs (already recorded),
-                        # this step's action was ignored; record nothing, mark new episode.
-                        ep_starts[j].append(cursor[j])
-                    else:
-                        c = cursor[j]
-                        obs[c] = prep_obs(o_batch[j])
-                        acts[c] = a[j]
-                        rews[c] = r[j]
-                        dones[c] = done[j]
-                        cursor[j] += 1
-                        pbar.update(1)
-
-                o_batch = o_next
-                prev_done = done
-
-        for arr in (obs, acts, rews, dones):
-            arr.flush()
-
-        # merge: per-segment starts are already in global coordinates; sentinel = T
-        bounds = np.array(
-            sorted(s for starts in ep_starts for s in starts) + [total_timesteps]
-        )
-        np.save(run_dir / "ep_starts.npy", bounds)
-
-        ep_lengths = np.diff(bounds)
-        # per-episode returns from the flat reward array
-        ep_returns = np.array(
-            [rews[s:e].sum() for s, e in zip(bounds[:-1], bounds[1:])]
-        )
-
-        meta.update(
-            {
-                "complete": True,
-                "finished_at": datetime.now(timezone.utc).isoformat(),
-                "wall_time_sec": round(time.time() - t0, 1),
-                "stats": {
-                    "num_episodes": int(len(ep_lengths)),
-                    "ep_length": {
-                        "mean": float(ep_lengths.mean()),
-                        "min": int(ep_lengths.min()),
-                        "max": int(ep_lengths.max()),
-                    },
-                    "ep_return": {
-                        "mean": float(ep_returns.mean()),
-                        "std": float(ep_returns.std()),
-                    },
-                    "disk_bytes": int(
-                        sum(
-                            (run_dir / f"{n}.npy").stat().st_size
-                            for n in ("obs", "acts", "rews", "dones")
-                        )
-                    ),
-                },
-            }
-        )
-        write_meta(run_dir, meta)
-
-        print(f"Saved {int(len(ep_lengths))} rollouts to {run_dir}")
+            # We shift the observation by one (recording 1,001) so we
+            # can store both the initial and final observation
+            rollout_obs[:, t + 1] = o
+            rollout_act[:, t] = a
     finally:
         envs.close()
+    return rollout_obs, rollout_act
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description=f"Collect random-policy rollouts from {ENV_ID}."
-    )
-    parser.add_argument(
-        "--total-timesteps",
-        "-t",
-        type=int,
-        default=T,
-        help=f"Total number of timesteps to collect. Must be divisible by {N}.",
-    )
-    args = parser.parse_args()
+def main(num_envs: int = 16, run_name: str = "vae"):
+    # Load or create the datastore we'll save to
+    data_path = ROOT_DIR / "data" / run_name
+    obs, act = create_or_read_datastore(data_path)
 
-    collect_data(total_timesteps=args.total_timesteps)
+    start_ix = obs.shape[0]
+    with tqdm(
+        total=NUM_ROLLOUTS,
+        initial=start_ix,
+        desc="Rollouts",
+        position=0,
+    ) as outer:
+        for rollout in range(start_ix, NUM_ROLLOUTS, num_envs):
+            # gymnasium distributes seeds across vectorised environments like (s, s+1, s+2, ...).
+            # I don't want to reuse seeds and reduce stochasticity, so multiply the seed to prevent reuse
+            seed = rollout * 250
+            rollout_obs, rollout_act = collect_rollout(num_envs, seed)
+
+            # Save the rollouts to the persistent stores
+            obs.append(rollout_obs)
+            act.append(rollout_act)
+            outer.update(num_envs)
 
 
 if __name__ == "__main__":
-    main()
+    tyro.cli(main)
