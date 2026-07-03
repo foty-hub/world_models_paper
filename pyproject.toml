@@ -18,13 +18,16 @@ dependencies = [
     "jaxtyping>=0.3.10",
     "matplotlib>=3.10.9",
     "mediapy>=1.2.6",
-    "opencv-python>=4.13.0.92",
+    "opencv-python==4.12.0.88",
+    "opencv-python-headless>=5.0.0.93",
     "optax>=0.2.8",
     "orbax>=0.1.9",
     "pillow>=12.2.0",
     "swig>=4.4.1",
     "tqdm>=4.68.2",
+    "types-tqdm>=4.68.0.20260608",
     "tyro>=1.0.14",
+    "zarr>=3.2.1",
 ]
 
 [build-system]
@@ -36,3 +39,10 @@ packages = ["src/wm"]
 
 [tool.ruff]
 ignore = ["F722"] # irritating error with jaxtyping
+
+[tool.pyrefly]
+preset = "default"
+project-includes = [
+    "**/*.py*",
+    "**/*.ipynb",
+]
