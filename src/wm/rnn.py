@@ -6,6 +6,11 @@ from einops import rearrange, repeat
 from flax import nnx
 from jaxtyping import Array, Shaped
 
+type Carry = tuple[
+    Shaped[Array, "Batch LatentDim+ActionDim"],
+    Shaped[Array, "Batch RNNHiddenDim"],
+]
+
 
 @chex.dataclass
 class MDNRNNOut:
@@ -41,8 +46,8 @@ class MDNRNN(nnx.Module):
         self, x: Shaped[Array, "Batch Time Latent+ActionDim"], temperature: float = 1.0
     ) -> MDNRNNOut:
         chex.assert_rank(x, 3)
-        x = self.rnn(x)  # type: ignore
-        x = self.linear(x)
+        c, h = self.rnn(x)  # type: ignore
+        x = self.linear(c[0])
 
         # Extract the GMM mixture weights
         weights: Shaped[Array, "B T N"] = x[..., : self.n_mixtures]
@@ -118,6 +123,18 @@ class MDNRNN(nnx.Module):
         samples = mu + jnp.sqrt(temperature) * sigma * eps
         return samples
 
-    def unroll(self, x_init: Shaped):
-        "Autoregressively unroll over a given number of timesteps"
-        ...
+    def step(
+        self,
+        x: Shaped[Array, "Batch LatentDim+ActionDim"],
+        carry: Carry,
+    ) -> Carry:
+        "Unroll one step of the hidde"
+        x = rearrange(x, "B L -> B 1 L")
+        # 2nd return item is the hidden states for each step - but we're only
+        # considering 1 step so it's the same as the hidden state inside the carry
+        carry, _ = self.rnn(x, return_carry=True, initial_carry=carry)
+        return carry  # contains (y, h)
+
+    def initialize_carry(self, num_envs):
+        shape = (num_envs, self.latent_dim + self.action_dim)
+        return self.rnn.cell.initialize_carry(shape, self.rngs)  # type: ignore
