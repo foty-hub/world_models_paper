@@ -24,8 +24,15 @@ def create_or_read_datastore(data_path: Path) -> tuple[zarr.Array, zarr.Array]:
     else:
         print(f"Creating new datastore at {data_path}")
         z = zarr.create_group(store=data_path, overwrite=True)
-        obs = z.create_array("obs", shape=(0, 1001, 64, 64, 3), dtype=np.uint8)
-        act = z.create_array("act", shape=(0, 1000, 3), dtype=np.float32)
+        obs = z.create_array(
+            "obs",
+            shape=(0, 1001, 64, 64, 3),
+            chunks=(1, 1001, 64, 64, 3),
+            dtype=np.uint8,
+        )
+        act = z.create_array(
+            "act", shape=(0, 1000, 3), chunks=(1000, 1000, 3), dtype=np.float32
+        )
 
     return obs, act
 
