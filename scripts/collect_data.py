@@ -1,14 +1,14 @@
 from pathlib import Path
-import tyro
 
 import gymnasium as gym
 import numpy as np
+import tyro
 import zarr
 from flax import nnx
 from tqdm import tqdm, trange
 
 from wm import Agent
-from wm.utils import prep_obs
+from wm.utils import normalise_obs, prep_obs
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 ENV_ID = "CarRacing-v3"
@@ -35,56 +35,59 @@ def create_or_read_datastore(data_path: Path) -> tuple[zarr.Array, zarr.Array]:
 #   2. Roll it out across a series of batched episodes
 #   3. Save the data.
 #   4. Repeat
-def collect_rollout(num_envs, seed):
-    try:
-        agent = Agent(rngs=nnx.Rngs(seed))
-        envs = gym.make_vec(id=ENV_ID, num_envs=num_envs, vectorization_mode="async")
-        states, _ = envs.reset(seed=seed)
-        o = prep_obs(states)  # TODO: redo this looping implementation
-        # Instantiate data containers for a give rollout - which we'll then append to our
-        # persistent data store
-        rollout_obs = np.zeros(shape=(num_envs, 1001, 64, 64, 3), dtype=np.uint8)
-        rollout_act = np.zeros(shape=(num_envs, 1000, 3), dtype=np.float32)
-        rollout_obs[:, 0] = o
+def collect_rollout(num_envs, seed, envs):
+    agent = Agent(rngs=nnx.Rngs(seed))
+    states, _ = envs.reset(seed=seed)
+    o = prep_obs(states)
+    # Instantiate data containers for a give rollout - which we'll then append to our
+    # persistent data store
+    rollout_obs = np.zeros(shape=(num_envs, 1001, 64, 64, 3), dtype=np.uint8)
+    rollout_act = np.zeros(shape=(num_envs, 1000, 3), dtype=np.float32)
+    rollout_obs[:, 0] = o
 
-        carry = agent.initialize_carry(num_envs)
+    carry = agent.initialize_carry(num_envs)
 
-        for t in trange(1000, desc="Steps", position=1, leave=False):
-            a, carry = agent(o, carry)  # type: ignore
-            states, rewards, truncateds, terminateds, infos = envs.step(np.array(a))
-            o = prep_obs(states)
+    for t in trange(1000, desc="Steps", position=1, leave=False):
+        a, carry = agent(normalise_obs(o), carry)  # type: ignore
+        states, rewards, truncateds, terminateds, infos = envs.step(np.array(a))
+        o = prep_obs(states)
 
-            # We shift the observation by one (recording 1,001) so we
-            # can store both the initial and final observation
-            rollout_obs[:, t + 1] = o
-            rollout_act[:, t] = a
-    finally:
-        envs.close()
+        # We shift the observation by one (recording 1,001) so we
+        # can store both the initial and final observation
+        rollout_obs[:, t + 1] = o
+        rollout_act[:, t] = a
     return rollout_obs, rollout_act
 
 
 def main(num_envs: int = 16, run_name: str = "vae"):
+    print(f"Data collection run `{run_name}`\n  num_envs: {num_envs}")
+
     # Load or create the datastore we'll save to
     data_path = ROOT_DIR / "data" / run_name
     obs, act = create_or_read_datastore(data_path)
 
     start_ix = obs.shape[0]
-    with tqdm(
-        total=NUM_ROLLOUTS,
-        initial=start_ix,
-        desc="Rollouts",
-        position=0,
-    ) as outer:
-        for rollout in range(start_ix, NUM_ROLLOUTS, num_envs):
-            # gymnasium distributes seeds across vectorised environments like (s, s+1, s+2, ...).
-            # I don't want to reuse seeds and reduce stochasticity, so multiply the seed to prevent reuse
-            seed = rollout * 250
-            rollout_obs, rollout_act = collect_rollout(num_envs, seed)
+    envs = gym.make_vec(id=ENV_ID, num_envs=num_envs, vectorization_mode="async")
 
-            # Save the rollouts to the persistent stores
-            obs.append(rollout_obs)
-            act.append(rollout_act)
-            outer.update(num_envs)
+    try:
+        with tqdm(
+            total=NUM_ROLLOUTS,
+            initial=start_ix,
+            desc="Rollouts",
+            position=0,
+        ) as outer:
+            for rollout in range(start_ix, NUM_ROLLOUTS, num_envs):
+                # gymnasium distributes seeds across vectorised environments like (s, s+1, s+2, ...).
+                # I don't want to reuse seeds and reduce stochasticity, so multiply the seed to prevent reuse
+                seed = rollout * 250
+                rollout_obs, rollout_act = collect_rollout(num_envs, seed, envs)
+
+                # Save the rollouts to the persistent stores
+                obs.append(rollout_obs)
+                act.append(rollout_act)
+                outer.update(num_envs)
+    finally:
+        envs.close()
 
 
 if __name__ == "__main__":
