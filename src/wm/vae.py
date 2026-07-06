@@ -4,6 +4,8 @@ from chex import dataclass
 from flax import nnx
 from jaxtyping import Array, Shaped
 
+from wm.utils import cauchy_initializer
+
 
 @dataclass
 class LatentDict:
@@ -14,14 +16,19 @@ class LatentDict:
 
 # TODO: x inputs are uint8 - does that cause any issues?
 class Encoder(nnx.Module):
-    def __init__(self, latent_dim: int, rngs: nnx.Rngs):
+    def __init__(
+        self, latent_dim: int, rngs: nnx.Rngs, initializer_stddev: float = 0.01
+    ):
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
         # fmt: off
-        self.conv1 = nnx.Conv(  3,  32, (4, 4), strides=2, padding="VALID", rngs=self.rngs)
-        self.conv2 = nnx.Conv( 32,  64, (4, 4), strides=2, padding="VALID", rngs=self.rngs)
-        self.conv3 = nnx.Conv( 64, 128, (4, 4), strides=2, padding="VALID", rngs=self.rngs)
-        self.conv4 = nnx.Conv(128, 256, (4, 4), strides=2, padding="VALID", rngs=self.rngs)
+        init = cauchy_initializer(initializer_stddev)
+        params = dict(kernel_size=(4, 4), strides=2, padding="VALID", rngs=self.rngs, kernel_init=init, bias_init=init)
+
+        self.conv1 = nnx.Conv(  3,  32, **params) # type: ignore
+        self.conv2 = nnx.Conv( 32,  64, **params) # type: ignore
+        self.conv3 = nnx.Conv( 64, 128, **params) # type: ignore
+        self.conv4 = nnx.Conv(128, 256, **params) # type: ignore
         # fmt: on
         self.dense = nnx.Linear(1024, self.latent_dim * 2, rngs=self.rngs)
 
@@ -46,17 +53,23 @@ class Encoder(nnx.Module):
 
 
 class Decoder(nnx.Module):
-    def __init__(self, latent_dim: int, rngs: nnx.Rngs):
+    def __init__(
+        self, latent_dim: int, rngs: nnx.Rngs, initializer_stddev: float = 0.01
+    ):
+        init = cauchy_initializer(initializer_stddev)
+
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
         self.dense = nnx.Linear(self.latent_dim, 1024, rngs=self.rngs)
         # self.logsigma = nnx.Param(jnp.array(0.0))  # scalar sigma parameter
         self.logsigma = jnp.array(0.0)  # fixed scalar sigma
         # fmt: off
-        self.deconv1 = nnx.ConvTranspose(1024, 128, (5, 5), strides=2, padding="VALID", rngs=rngs)
-        self.deconv2 = nnx.ConvTranspose( 128,  64, (5, 5), strides=2, padding="VALID", rngs=rngs)
-        self.deconv3 = nnx.ConvTranspose(  64,  32, (6, 6), strides=2, padding="VALID", rngs=rngs)
-        self.deconv4 = nnx.ConvTranspose(  32,   3, (6, 6), strides=2, padding="VALID", rngs=rngs)
+        params = dict(strides=2, padding="VALID", rngs=rngs, kernel_init=init, bias_init=init)
+
+        self.deconv1 = nnx.ConvTranspose(1024, 128, kernel_size=(5, 5), **params) # type: ignore
+        self.deconv2 = nnx.ConvTranspose( 128,  64, kernel_size=(5, 5), **params) # type: ignore
+        self.deconv3 = nnx.ConvTranspose(  64,  32, kernel_size=(6, 6), **params) # type: ignore
+        self.deconv4 = nnx.ConvTranspose(  32,   3, kernel_size=(6, 6), **params) # type: ignore
         # fmt: on
 
     def __call__(self, z: Shaped[Array, "... LatentDim"]) -> Shaped[Array, "... H W C"]:
@@ -70,10 +83,15 @@ class Decoder(nnx.Module):
 
 
 class VAE(nnx.Module):
-    def __init__(self, latent_dim: int, rngs: nnx.Rngs) -> None:
+    def __init__(
+        self,
+        latent_dim: int,
+        rngs: nnx.Rngs,
+        initializer_stddev: float = 0.01,
+    ) -> None:
         self.rngs = rngs
-        self.encoder = Encoder(latent_dim, self.rngs)
-        self.decoder = Decoder(latent_dim, self.rngs)
+        self.encoder = Encoder(latent_dim, self.rngs, initializer_stddev)
+        self.decoder = Decoder(latent_dim, self.rngs, initializer_stddev)
 
     def encode(self, x: Shaped[Array, "... H W C"]) -> LatentDict:
         return self.encoder(x)
