@@ -71,7 +71,7 @@ def loss_fn(
     kl_loss = -0.5 * jnp.sum(1 + logvar - mu**2 - jnp.exp(logvar), axis=-1)
     kl_loss = jnp.mean(kl_loss)
 
-    loss = recon_loss + kl_loss
+    loss = recon_loss + model.beta * kl_loss
     return loss, {"loss": loss, "kl": kl_loss, "recon": recon_loss}
 
 
@@ -209,6 +209,7 @@ def main(
     worker_count: int = 0,
     data_frac: float = 0.2,
     latent_dim: int = 32,
+    vae_beta: float = 1.0,
     learning_rate: float = 8e-4,
     log_every: int = 500,
     ckpt_every: int = 1_000,
@@ -247,7 +248,10 @@ def main(
         print(f"Loaded {n_examples:,} examples in loader.")
 
         model = VAE(
-            latent_dim=latent_dim, rngs=nnx.Rngs(seed), initializer_stddev=0.0001
+            latent_dim=latent_dim,
+            rngs=nnx.Rngs(seed),
+            initializer_stddev=0.0001,
+            beta=vae_beta,
         )
 
         # TODO: learning rate schedule goes here

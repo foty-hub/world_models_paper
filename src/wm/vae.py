@@ -57,7 +57,10 @@ class Encoder(nnx.Module):
 
 class Decoder(nnx.Module):
     def __init__(
-        self, latent_dim: int, rngs: nnx.Rngs, initializer_stddev: float = 0.01
+        self,
+        latent_dim: int,
+        rngs: nnx.Rngs,
+        initializer_stddev: float = 0.01,
     ):
         init = cauchy_initializer(initializer_stddev)
 
@@ -91,7 +94,9 @@ class VAE(nnx.Module):
         latent_dim: int,
         rngs: nnx.Rngs,
         initializer_stddev: float = 0.01,
+        beta: float = 1.0,
     ) -> None:
+        self.beta = nnx.static(beta)
         self.rngs = rngs
         self.encoder = Encoder(latent_dim, self.rngs, initializer_stddev)
         self.decoder = Decoder(latent_dim, self.rngs, initializer_stddev)
