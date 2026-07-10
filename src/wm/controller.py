@@ -1,8 +1,7 @@
 import jax.numpy as jnp
 from flax import nnx
+from flax.typing import Initializer
 from jaxtyping import Array, Shaped
-
-from .initializer import cauchy_initializer
 
 
 class Controller(nnx.Module):
@@ -11,19 +10,17 @@ class Controller(nnx.Module):
         rnn_hidden_dim: int = 256,
         latent_dim: int = 32,
         action_dim: int = 3,
-        initializer_stddev: float = 0.01,
+        kernel_init: Initializer | None = None,
         *,
         rngs: nnx.Rngs,
     ):
-        # NNX's default initializer is LeCunNormal, but Ha & Schmidhuber uses a Cauchy
-        init = cauchy_initializer(initializer_stddev)
         in_dim = rnn_hidden_dim + latent_dim
+        kernel_init = kernel_init or nnx.initializers.lecun_normal()
         self.linear = nnx.Linear(
             in_features=in_dim,
             out_features=action_dim,
             rngs=rngs,
-            kernel_init=init,
-            bias_init=init,
+            kernel_init=kernel_init,
         )
 
     def __call__(

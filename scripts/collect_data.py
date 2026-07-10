@@ -8,6 +8,7 @@ from flax import nnx
 from tqdm import tqdm, trange
 
 from wm import Agent
+from wm.initializer import cauchy_initializer
 from wm.utils import normalise_obs, prep_obs
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -46,7 +47,9 @@ def collect_rollout(
     seed: int, envs: gym.vector.VectorEnv
 ) -> tuple[np.ndarray, np.ndarray]:
     init_stddev = 0.01 * np.random.uniform(0, 1)
-    agent = Agent(rngs=nnx.Rngs(seed), initializer_stddev=init_stddev)
+    agent = Agent(
+        rngs=nnx.Rngs(seed), kernel_init=cauchy_initializer(init_stddev)
+    )
     states, _ = envs.reset(seed=seed)
     o = prep_obs(states)
     # Instantiate data containers for a give rollout - which we'll then append to our

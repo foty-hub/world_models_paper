@@ -2,6 +2,7 @@
 import chex
 import jax.numpy as jnp
 from flax import nnx
+from flax.typing import Initializer
 from jaxtyping import Array, Shaped
 
 from .controller import Controller
@@ -18,14 +19,14 @@ class Agent(nnx.Module):
         controller: Controller | None = None,
         latent_dim: int = 32,
         action_dim: int = 3,
-        initializer_stddev: float = 0.01,
+        kernel_init: Initializer | None = None,
         *,
         rngs: nnx.Rngs,
     ):
         # fmt: off
-        self.vae = vae if vae else VAE(latent_dim, rngs=rngs, initializer_stddev=initializer_stddev)
-        self.rnn = rnn if rnn else MDNRNN(latent_dim, action_dim, rngs=rngs, initializer_stddev=initializer_stddev)
-        self.controller = controller if controller else Controller(rngs=rngs, initializer_stddev=initializer_stddev)
+        self.vae = vae if vae else VAE(latent_dim, rngs=rngs, kernel_init=kernel_init)
+        self.rnn = rnn if rnn else MDNRNN(latent_dim, action_dim, rngs=rngs, kernel_init=kernel_init)
+        self.controller = controller if controller else Controller(rngs=rngs, kernel_init=kernel_init)
         # fmt: on
 
     def initialize_carry(self, num_envs: int) -> Carry:

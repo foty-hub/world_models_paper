@@ -2,9 +2,8 @@ import einops
 import jax.numpy as jnp
 from chex import dataclass
 from flax import nnx
+from flax.typing import Initializer
 from jaxtyping import Array, Shaped
-
-from .initializer import cauchy_initializer
 
 
 @dataclass
@@ -17,20 +16,25 @@ class LatentDict:
 # TODO: x inputs are uint8 - does that cause any issues?
 class Encoder(nnx.Module):
     def __init__(
-        self, latent_dim: int, rngs: nnx.Rngs, initializer_stddev: float = 0.01
+        self,
+        latent_dim: int,
+        rngs: nnx.Rngs,
+        kernel_init: Initializer | None = None,
     ):
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
+        kernel_init = kernel_init or nnx.initializers.lecun_normal()
         # fmt: off
-        init = cauchy_initializer(initializer_stddev)
-        params = dict(kernel_size=(4, 4), strides=2, padding="VALID", rngs=self.rngs, kernel_init=init, bias_init=init)
+        params = dict(kernel_size=(4, 4), strides=2, padding="VALID", rngs=self.rngs, kernel_init=kernel_init)
 
         self.conv1 = nnx.Conv(  3,  32, **params) # type: ignore
         self.conv2 = nnx.Conv( 32,  64, **params) # type: ignore
         self.conv3 = nnx.Conv( 64, 128, **params) # type: ignore
         self.conv4 = nnx.Conv(128, 256, **params) # type: ignore
         # fmt: on
-        self.dense = nnx.Linear(1024, self.latent_dim * 2, rngs=self.rngs)
+        self.dense = nnx.Linear(
+            1024, self.latent_dim * 2, rngs=self.rngs, kernel_init=kernel_init
+        )
 
     def __call__(self, x: Shaped[Array, "... H W C"]) -> LatentDict:
         "Batch-friendly encoder method."
@@ -60,17 +64,18 @@ class Decoder(nnx.Module):
         self,
         latent_dim: int,
         rngs: nnx.Rngs,
-        initializer_stddev: float = 0.01,
+        kernel_init: Initializer | None = None,
     ):
-        init = cauchy_initializer(initializer_stddev)
-
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
-        self.dense = nnx.Linear(self.latent_dim, 1024, rngs=self.rngs)
+        kernel_init = kernel_init or nnx.initializers.lecun_normal()
+        self.dense = nnx.Linear(
+            self.latent_dim, 1024, rngs=self.rngs, kernel_init=kernel_init
+        )
         # self.logsigma = nnx.Param(jnp.array(0.0))  # scalar sigma parameter
         self.logsigma = jnp.array(0.0)  # fixed scalar sigma
         # fmt: off
-        params = dict(strides=2, padding="VALID", rngs=rngs, kernel_init=init, bias_init=init)
+        params = dict(strides=2, padding="VALID", rngs=rngs, kernel_init=kernel_init)
 
         self.deconv1 = nnx.ConvTranspose(1024, 128, kernel_size=(5, 5), **params) # type: ignore
         self.deconv2 = nnx.ConvTranspose( 128,  64, kernel_size=(5, 5), **params) # type: ignore
@@ -93,13 +98,13 @@ class VAE(nnx.Module):
         self,
         latent_dim: int,
         rngs: nnx.Rngs,
-        initializer_stddev: float = 0.01,
+        kernel_init: Initializer | None = None,
         beta: float = 1.0,
     ) -> None:
         self.beta = nnx.static(beta)
         self.rngs = rngs
-        self.encoder = Encoder(latent_dim, self.rngs, initializer_stddev)
-        self.decoder = Decoder(latent_dim, self.rngs, initializer_stddev)
+        self.encoder = Encoder(latent_dim, self.rngs, kernel_init)
+        self.decoder = Decoder(latent_dim, self.rngs, kernel_init)
 
     def encode(self, x: Shaped[Array, "... H W C"]) -> LatentDict:
         return self.encoder(x)

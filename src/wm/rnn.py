@@ -4,9 +4,8 @@ import jax
 import jax.numpy as jnp
 from einops import rearrange, repeat
 from flax import nnx
+from flax.typing import Initializer
 from jaxtyping import Array, Shaped
-
-from .initializer import cauchy_initializer
 
 type Carry = tuple[
     Shaped[Array, "Batch RNNHiddenDim"],
@@ -28,33 +27,38 @@ class MDNRNN(nnx.Module):
         action_dim: int,
         n_mixtures: int = 5,
         hidden_units: int = 256,
-        initializer_stddev: float = 0.01,
+        kernel_init: Initializer | None = None,
         *,
         rngs: nnx.Rngs,
     ):
-        init = cauchy_initializer(initializer_stddev)
-
         self.rngs = rngs
         self.latent_dim = nnx.static(latent_dim)
         self.action_dim = nnx.static(action_dim)
         self.n_mixtures = nnx.static(n_mixtures)
 
-        self.rnn = nnx.RNN(
-            nnx.OptimizedLSTMCell(
+        if kernel_init is None:
+            cell = nnx.OptimizedLSTMCell(
                 latent_dim + action_dim,
                 hidden_units,
                 rngs=rngs,
-                kernel_init=init,
-                bias_init=init,
             )
-        )
+            output_kernel_init = nnx.initializers.lecun_normal()
+        else:
+            cell = nnx.OptimizedLSTMCell(
+                latent_dim + action_dim,
+                hidden_units,
+                rngs=rngs,
+                kernel_init=kernel_init,
+                recurrent_kernel_init=kernel_init,
+            )
+            output_kernel_init = kernel_init
+        self.rnn = nnx.RNN(cell)
         # linear layer with outputs for GMM weights, means and logvars
         self.linear = nnx.Linear(
             hidden_units,
             n_mixtures * 2 * latent_dim + n_mixtures,
             rngs=rngs,
-            kernel_init=init,
-            bias_init=init,
+            kernel_init=output_kernel_init,
         )
 
     def __call__(
