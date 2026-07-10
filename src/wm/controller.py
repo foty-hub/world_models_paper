@@ -1,7 +1,8 @@
+import jax.numpy as jnp
 from flax import nnx
 from jaxtyping import Array, Shaped
 
-from wm.utils import cauchy_initializer
+from .initializer import cauchy_initializer
 
 
 class Controller(nnx.Module):
@@ -32,8 +33,8 @@ class Controller(nnx.Module):
         a = nnx.tanh(a)  # clamp to [-1, +1]
 
         # fmt: off
-                                                       # steer: [-1, +1]
-        a = a.at[..., 1].set((a[..., 1] + 1.0) / 2.0)  #   gas: [ 0,  1]
-        a = a.at[..., 2].set(nnx.relu(a[..., 2]))      # brake: [ 0,  1], zero at neutral
+                                                                 # steer: [-1, +1]
+        a = a.at[..., 1].set((a[..., 1] / 2.0 + 0.5))            #   gas: [ 0,  1]
+        a = a.at[..., 2].set(jnp.clip(a[..., 2], 0.0, 1.0))      # brake: [ 0,  1], zero at neutral
         # fmt: on
         return a

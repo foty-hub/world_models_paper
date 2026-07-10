@@ -6,7 +6,7 @@ from einops import rearrange, repeat
 from flax import nnx
 from jaxtyping import Array, Shaped
 
-from wm.utils import cauchy_initializer
+from .initializer import cauchy_initializer
 
 type Carry = tuple[
     Shaped[Array, "Batch LatentDim+ActionDim"],

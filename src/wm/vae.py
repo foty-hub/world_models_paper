@@ -4,7 +4,7 @@ from chex import dataclass
 from flax import nnx
 from jaxtyping import Array, Shaped
 
-from wm.utils import cauchy_initializer
+from .initializer import cauchy_initializer
 
 
 @dataclass
@@ -43,6 +43,9 @@ class Encoder(nnx.Module):
 
         # now we have a [32mu, 32sigma] vector -> convert to a latent
         mu, logvar = jnp.split(x, 2, axis=-1)
+        logvar = jnp.clip(
+            logvar, -10, 4
+        )  # clip to prevent nans due to Cauchy initialisation.
         sigma = jnp.exp(0.5 * logvar)  # ensure the standard deviation is positive
 
         # construct the latent vector as z = mu + sigma * N(0, 1)

@@ -18,12 +18,15 @@ class Agent(nnx.Module):
         controller: Controller | None = None,
         latent_dim: int = 32,
         action_dim: int = 3,
+        initializer_stddev: float = 0.01,
         *,
         rngs: nnx.Rngs,
     ):
-        self.vae = vae if vae else VAE(latent_dim, rngs=rngs)
-        self.rnn = rnn if rnn else MDNRNN(latent_dim, action_dim, rngs=rngs)
-        self.controller = controller if controller else Controller(rngs=rngs)
+        # fmt: off
+        self.vae = vae if vae else VAE(latent_dim, rngs=rngs, initializer_stddev=initializer_stddev)
+        self.rnn = rnn if rnn else MDNRNN(latent_dim, action_dim, rngs=rngs, initializer_stddev=initializer_stddev)
+        self.controller = controller if controller else Controller(rngs=rngs, initializer_stddev=initializer_stddev)
+        # fmt: on
 
     def initialize_carry(self, num_envs: int) -> Carry:
         return self.rnn.initialize_carry(num_envs)

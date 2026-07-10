@@ -42,12 +42,16 @@ def create_or_read_datastore(data_path: Path) -> tuple[zarr.Array, zarr.Array]:
 #   2. Roll it out across a series of batched episodes
 #   3. Save the data.
 #   4. Repeat
-def collect_rollout(num_envs, seed, envs):
-    agent = Agent(rngs=nnx.Rngs(seed))
+def collect_rollout(
+    seed: int, envs: gym.vector.VectorEnv
+) -> tuple[np.ndarray, np.ndarray]:
+    init_stddev = 0.01 * np.random.uniform(0, 1)
+    agent = Agent(rngs=nnx.Rngs(seed), initializer_stddev=init_stddev)
     states, _ = envs.reset(seed=seed)
     o = prep_obs(states)
     # Instantiate data containers for a give rollout - which we'll then append to our
     # persistent data store
+    num_envs = envs.num_envs
     rollout_obs = np.zeros(shape=(num_envs, 1001, 64, 64, 3), dtype=np.uint8)
     rollout_act = np.zeros(shape=(num_envs, 1000, 3), dtype=np.float32)
     rollout_obs[:, 0] = o
@@ -87,7 +91,7 @@ def main(num_envs: int = 16, run_name: str = "vae"):
                 # gymnasium distributes seeds across vectorised environments like (s, s+1, s+2, ...).
                 # I don't want to reuse seeds and reduce stochasticity, so multiply the seed to prevent reuse
                 seed = rollout * 250
-                rollout_obs, rollout_act = collect_rollout(num_envs, seed, envs)
+                rollout_obs, rollout_act = collect_rollout(seed, envs)
 
                 # Save the rollouts to the persistent stores
                 obs.append(rollout_obs)

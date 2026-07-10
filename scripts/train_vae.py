@@ -12,12 +12,13 @@ import orbax.checkpoint as ocp
 from flax import nnx
 from jaxtyping import Array, Shaped
 
-from wm.data import make_observation_loader
+from wm.data import get_vae_dataloader
+from wm.utils.obs import normalise_obs, unnormalise_obs
 from wm.vae import VAE
 
 
 def plot_reconstruction(
-    x: Shaped[Array, "B H W C"],
+    x: Shaped[np.ndarray, "B H W C"],
     model: VAE,
     fp: str | Path,
     *,
@@ -28,10 +29,10 @@ def plot_reconstruction(
 
     n_plots = min(n_plots, x.shape[0])
     x = x[:n_plots]
-    x_pred = model(x)
+    x_pred = model(x)  # type: ignore
 
-    x = np.clip(np.asarray(x), 0.0, 1.0)
-    x_pred = np.clip(np.asarray(x_pred), 0.0, 1.0)
+    x = unnormalise_obs(np.clip(np.asarray(x), -1.0, 1.0))  # type: ignore
+    x_pred = unnormalise_obs(np.clip(np.asarray(x_pred), -1.0, 1.0))
 
     fig, axes = plt.subplots(n_plots, 2, figsize=(4, 2 * n_plots), squeeze=False)
     for i in range(n_plots):
@@ -48,9 +49,11 @@ def plot_reconstruction(
 
 
 @nnx.value_and_grad(has_aux=True)
-def loss_fn(model: VAE, x: Shaped[Array, "B H W C"]) -> Shaped[Array, ""]:
+def loss_fn(
+    model: VAE, x: Shaped[Array, "B H W C"]
+) -> tuple[Shaped[Array, ""], dict[str, Array]]:
     latent_dict = model.encode(x)
-    mu, logvar, z = latent_dict.to_tuple()
+    mu, logvar, z = latent_dict.to_tuple()  # type: ignore
 
     x_pred = model.decode(z)
 
@@ -90,6 +93,8 @@ def plot_loss(losses: list[dict[str, float]], fp: str | Path) -> None:
     ax.plot(steps, [d["recon"] for d in losses], label="Reconstruction")
     ax.set_xlabel("Step")
     ax.set_ylabel("Loss")
+    ax.set_yscale("log")
+
     ax.legend(frameon=False)
     fig.tight_layout()
     fig.savefig(fp)
@@ -142,7 +147,7 @@ def append_loss(run_dir: Path, loss: dict[str, float]) -> None:
 def log_training(
     model: VAE,
     losses: list[dict[str, float]],
-    reconstruction_batch: Shaped[Array, "B H W C"],
+    reconstruction_batch: Shaped[np.ndarray, "B H W C"],
     run_dir: Path,
     step: int,
 ) -> None:
@@ -196,31 +201,18 @@ def restore_checkpoint(
 
 
 # CLI args
-# --batch-size
-# --seed
-# --num-epochs
-# --worker-count
-# --data-frac
-# --latent-dim
-# --learning-rate
-# --log-every
-# --checkpoint-every
-# --run-name
-# --data-dir
-# --experiments-dir
-# --max-checkpoints-to-keep
 def main(
     run_name: str = "vae_train",
     batch_size: int = 128,
     seed: int = 0,
     num_epochs: int = 1,
-    worker_count: int = 2,
+    worker_count: int = 0,
     data_frac: float = 0.2,
     latent_dim: int = 32,
     learning_rate: float = 8e-4,
     log_every: int = 500,
     ckpt_every: int = 1_000,
-    data_dir: str = "data",
+    data_dir: str = "data/vae",
     experiments_dir: str = "experiments",
     max_checkpoints_to_keep: int | None = 3,
 ):
@@ -243,20 +235,20 @@ def main(
         latest_step = checkpoint_manager.latest_step()
         save_config(run_dir, config, latest_step)
 
-        loader = make_observation_loader(
+        loader = get_vae_dataloader(
             data_dir,
             batch_size=batch_size,
-            shuffle=True,
-            seed=seed,
             num_epochs=num_epochs,
-            worker_count=worker_count,
-            data_frac=data_frac,
+            num_workers=worker_count,
+            frac=data_frac,
         )
 
         n_examples = len(loader._data_source)
         print(f"Loaded {n_examples:,} examples in loader.")
 
-        model = VAE(latent_dim=latent_dim, rngs=nnx.Rngs(seed))
+        model = VAE(
+            latent_dim=latent_dim, rngs=nnx.Rngs(seed), initializer_stddev=0.0001
+        )
 
         # TODO: learning rate schedule goes here
         tx = optax.adam(learning_rate=learning_rate)
@@ -277,7 +269,7 @@ def main(
             print(f"{msg}.")
 
         # Extract one batch that we'll reuse for every time we log.
-        reconstruction_batch = next(iter(loader))
+        reconstruction_batch = normalise_obs(next(iter(loader)))
 
         losses = load_losses(run_dir)
         last_checkpoint_step = latest_step
@@ -286,6 +278,7 @@ def main(
         print(f"Beginning training over {n_examples // batch_size:,} training steps")
         for local_step, x in enumerate(loader):
             global_step = start_step + local_step
+            x = normalise_obs(x)
             loss = train_step(model, optim, x)
             loss_record = to_float_metrics(loss, global_step)
             losses.append(loss_record)
