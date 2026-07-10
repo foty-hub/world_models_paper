@@ -1,5 +1,6 @@
 """Drive the learned CarRacing world model in a Pygame window."""
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import jax
@@ -9,14 +10,6 @@ import tyro
 import zarr
 from flax import nnx
 
-from wm.imagination import (
-    MAX_TEMPERATURE,
-    MIN_TEMPERATURE,
-    TEMPERATURE_STEP,
-    RolloutSelection,
-    adjust_temperature,
-    car_racing_action,
-)
 from wm.utils import load_rnn, load_vae, normalise_obs
 
 IMAGE_SIZE = 64
@@ -24,6 +17,30 @@ STATUS_HEIGHT = 112
 BACKGROUND = (18, 18, 22)
 FOREGROUND = (235, 235, 240)
 MUTED = (165, 165, 175)
+MIN_TEMPERATURE = 0.05
+MAX_TEMPERATURE = 2.0
+TEMPERATURE_STEP = 0.05
+
+
+def car_racing_action(
+    *, left: bool, right: bool, gas: bool, brake: bool
+) -> np.ndarray:
+    """Convert held keys to Gymnasium CarRacing's continuous action vector."""
+    steering = float(right) - float(left)
+    return np.asarray([steering, float(gas), float(brake)], dtype=np.float32)
+
+
+def adjust_temperature(temperature: float, delta: float) -> float:
+    """Adjust and clamp the MDN sampling temperature."""
+    return float(np.clip(temperature + delta, MIN_TEMPERATURE, MAX_TEMPERATURE))
+
+
+@dataclass
+class RolloutSelection:
+    """The dataset frame and random seed needed to reproduce a rollout."""
+
+    episode: int
+    rollout_seed: int
 
 
 @nnx.jit
