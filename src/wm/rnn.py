@@ -9,7 +9,7 @@ from jaxtyping import Array, Shaped
 from .initializer import cauchy_initializer
 
 type Carry = tuple[
-    Shaped[Array, "Batch LatentDim+ActionDim"],
+    Shaped[Array, "Batch RNNHiddenDim"],
     Shaped[Array, "Batch RNNHiddenDim"],
 ]
 
@@ -62,7 +62,15 @@ class MDNRNN(nnx.Module):
     ) -> MDNRNNOut:
         chex.assert_rank(x, 3)
         x = self.rnn(x)  # type: ignore
-        x = self.linear(x)
+        return self._stats_from_hidden(x, temperature)
+
+    def _stats_from_hidden(
+        self,
+        hidden: Shaped[Array, "Batch Time RNNHiddenDim"],
+        temperature: float,
+    ) -> MDNRNNOut:
+        """Project recurrent outputs into mixture-density parameters."""
+        x = self.linear(hidden)
 
         # Extract the GMM mixture weights
         weights: Shaped[Array, "B T N"] = x[..., : self.n_mixtures]
@@ -144,12 +152,68 @@ class MDNRNN(nnx.Module):
         samples = mu + jnp.sqrt(temperature) * sigma * eps
         return samples
 
+    def sample_step(
+        self,
+        z: Shaped[Array, "Batch LatentDim"],
+        action: Shaped[Array, "Batch ActionDim"],
+        carry: Carry,
+        temperature: float = 1.0,
+        key: Array | None = None,
+    ) -> tuple[Shaped[Array, "Batch LatentDim"], Carry]:
+        """Sample ``z[t + 1]`` and advance the recurrent state by one step.
+
+        This is the autoregressive inference counterpart to :meth:`logprobs`:
+        the current latent and action are consumed exactly once, and the returned
+        carry must be supplied to the next call.
+        """
+        chex.assert_rank([z, action], 2)
+        chex.assert_axis_dimension(z, 1, self.latent_dim)
+        chex.assert_axis_dimension(action, 1, self.action_dim)
+        if z.shape[0] != action.shape[0]:
+            raise ValueError("z and action must have the same batch size")
+        # Keep the eager API friendly while allowing ``temperature`` to become a
+        # tracer when callers wrap this method in ``nnx.jit``.
+        if isinstance(temperature, float) and temperature <= 0:
+            raise ValueError("temperature must be greater than zero")
+
+        rnn_input = jnp.concatenate([z, action], axis=-1)
+        carry, hidden = self.rnn.cell(carry, rnn_input)  # type: ignore
+        hidden = rearrange(hidden, "B H -> B 1 H")
+        stats = self._stats_from_hidden(hidden, temperature)
+
+        # Reuse sequence sampling for the singleton time dimension. Sampling from
+        # the already-computed stats avoids advancing the LSTM a second time.
+        mu = stats.mu
+        sigma = stats.sigma
+        log_weights = jnp.log(stats.mixture_weights)
+        batch_size, _, _, latent_dim = mu.shape
+
+        if key is not None:
+            noise_key, mixture_key = jax.random.split(key)
+            indices = jax.random.categorical(mixture_key, log_weights, axis=-1)
+            eps = jax.random.normal(
+                noise_key, shape=(batch_size, 1, latent_dim), dtype=mu.dtype
+            )
+        else:
+            indices = self.rngs.categorical(log_weights, axis=-1)
+            eps = self.rngs.normal(shape=(batch_size, 1, latent_dim), dtype=mu.dtype)
+
+        indices = rearrange(indices, "B T -> B T 1 1")
+        selected_mu = jnp.take_along_axis(mu, indices, axis=-2)
+        selected_sigma = jnp.take_along_axis(sigma, indices, axis=-2)
+        selected_mu = rearrange(selected_mu, "B 1 1 Z -> B Z")
+        selected_sigma = rearrange(selected_sigma, "B 1 1 Z -> B Z")
+        eps = rearrange(eps, "B 1 Z -> B Z")
+
+        z_next = selected_mu + jnp.sqrt(temperature) * selected_sigma * eps
+        return z_next, carry
+
     def step(
         self,
         x: Shaped[Array, "Batch LatentDim+ActionDim"],
         carry: Carry,
     ) -> Carry:
-        "Unroll one step of the hidde"
+        "Unroll one step of the hidden state without predicting a latent."
         x = rearrange(x, "B L -> B 1 L")
         # 2nd return item is the hidden states for each step - but we're only
         # considering 1 step so it's the same as the hidden state inside the carry
