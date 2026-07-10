@@ -8,7 +8,7 @@ from jaxtyping import Shaped
 
 class VAESource(grain.RandomAccessDataSource):
     def __init__(self, path: str | PathLike):
-        z = zarr.open_group(path, mode="r")
+        z = zarr.open_group(str(path), mode="r")
         self.obs: zarr.Array = z["obs"]  # type: ignore
 
         shape = self.obs.shape
@@ -19,10 +19,10 @@ class VAESource(grain.RandomAccessDataSource):
     def __len__(self) -> int:
         return self.n_samples
 
-    def __getitem__(self, idx: int) -> Shaped[np.ndarray, "H W C"]:
+    def __getitem__(self, index: int) -> Shaped[np.ndarray, "H W C"]:
         # We use divmod here as the inverse equivalent of...
         #   ix = ep_ix * num_timesteps + time_ix
-        ep_idx, time_idx = divmod(idx, self.n_timesteps)
+        ep_idx, time_idx = divmod(index, self.n_timesteps)
         return np.asarray(self.obs[ep_idx, time_idx])
 
 
@@ -48,3 +48,56 @@ def get_vae_dataloader(
     )
 
     return loader
+
+
+class RNNSource(grain.RandomAccessDataSource):
+    """Random-access source that returns one latent episode at a time."""
+
+    def __init__(self, path: str | PathLike, vae_name: str = "vae"):
+        z = zarr.open_group(str(path), mode="r")
+        self.acts: zarr.Array = z["act"]  # type: ignore
+        self.mus: zarr.Array = z[f"latents/{vae_name}/mu"]  # type: ignore
+        self.logvars: zarr.Array = z[f"latents/{vae_name}/logvar"]  # type: ignore
+
+        if self.acts.ndim != 3 or self.mus.ndim != 3 or self.logvars.ndim != 3:
+            raise ValueError("RNN arrays must have shapes [episode, time, features]")
+        if self.mus.shape != self.logvars.shape:
+            raise ValueError("mu and logvar arrays must have the same shape")
+        if self.acts.shape[0] != self.mus.shape[0]:
+            raise ValueError("action and latent arrays must have the same episode count")
+        if self.mus.shape[1] != self.acts.shape[1] + 1:
+            raise ValueError("each episode must have one more latent than action")
+
+        self.latent_dim = self.mus.shape[2]
+        self.action_dim = self.acts.shape[2]
+
+    def __len__(self) -> int:
+        return self.acts.shape[0]
+
+    def __getitem__(self, index: int) -> dict[str, np.ndarray]:
+        return {
+            "acts": np.asarray(self.acts[index]),
+            "mus": np.asarray(self.mus[index]),
+            "logvars": np.asarray(self.logvars[index]),
+        }
+
+
+def get_rnn_dataloader(
+    path: str | PathLike,
+    vae_name: str = "vae",
+    batch_size: int = 32,
+    num_workers: int = 0,
+    num_epochs: int = 1,
+    seed: int = 0,
+) -> grain.DataLoader:
+    """Return a shuffled Grain loader of complete latent episodes."""
+    source = RNNSource(path, vae_name)
+    sampler = grain.IndexSampler(
+        num_records=len(source), shuffle=True, num_epochs=num_epochs, seed=seed
+    )
+    return grain.DataLoader(
+        data_source=source,
+        sampler=sampler,
+        worker_count=num_workers,
+        operations=[grain.BatchOperation(batch_size, drop_remainder=True)],
+    )

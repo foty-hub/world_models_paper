@@ -61,8 +61,8 @@ class MDNRNN(nnx.Module):
         self, x: Shaped[Array, "Batch Time Latent+ActionDim"], temperature: float = 1.0
     ) -> MDNRNNOut:
         chex.assert_rank(x, 3)
-        c, h = self.rnn(x)  # type: ignore
-        x = self.linear(c[0])
+        x = self.rnn(x)  # type: ignore
+        x = self.linear(x)
 
         # Extract the GMM mixture weights
         weights: Shaped[Array, "B T N"] = x[..., : self.n_mixtures]
@@ -81,12 +81,18 @@ class MDNRNN(nnx.Module):
 
     def logprobs(
         self,
-        x: Shaped[Array, "Batch Time+1 Latent+ActionDim"],
+        z: Shaped[Array, "Batch Time+1 LatentDim"],
+        actions: Shaped[Array, "Batch Time ActionDim"],
     ) -> Shaped[Array, "Batch Time"]:
-        "Given an input array x, call the MDN-RNN and compute the log probabilities of the data."
-        chex.assert_axis_dimension(x, 2, self.latent_dim + self.action_dim)
-        x_t = x[:, :-1, :]
-        z_t1 = x[:, 1:, : self.latent_dim]
+        """Compute log p(z[t + 1] | z[t], action[t]) for each transition."""
+        chex.assert_rank([z, actions], 3)
+        chex.assert_axis_dimension(z, 2, self.latent_dim)
+        chex.assert_axis_dimension(actions, 2, self.action_dim)
+        if z.shape[0] != actions.shape[0] or z.shape[1] != actions.shape[1] + 1:
+            raise ValueError("z must have shape [B, T + 1, Z] for actions [B, T, A]")
+
+        x_t = jnp.concatenate([z[:, :-1], actions], axis=-1)
+        z_t1 = z[:, 1:]
         z_t1 = repeat(z_t1, "B T Z -> B T N Z", N=self.n_mixtures)
 
         stats = self(x_t, 1.0)
