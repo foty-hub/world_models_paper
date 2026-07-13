@@ -22,9 +22,7 @@ MAX_TEMPERATURE = 2.0
 TEMPERATURE_STEP = 0.05
 
 
-def car_racing_action(
-    *, left: bool, right: bool, gas: bool, brake: bool
-) -> np.ndarray:
+def car_racing_action(*, left: bool, right: bool, gas: bool, brake: bool) -> np.ndarray:
     """Convert held keys to Gymnasium CarRacing's continuous action vector."""
     steering = float(right) - float(left)
     return np.asarray([steering, float(gas), float(brake)], dtype=np.float32)
@@ -112,8 +110,7 @@ def draw_status(
 
 
 def main(
-    vae_path: str = "experiments/vae",
-    rnn_path: str = "experiments/rnn",
+    vae_name: str = "beta1.0",
     data_path: str = "data/random_data",
     episode: int | None = None,
     seed: int = 0,
@@ -123,6 +120,9 @@ def main(
 ) -> None:
     """Interact with the trained MDN-RNN and VAE entirely in imagination."""
     validate_args(temperature=temperature, scale=scale, fps=fps, episode=episode)
+
+    vae_path = f"experiments/vae/{vae_name}"
+    rnn_path = f"experiments/rnn/{vae_name}"
 
     vae_dir = Path(vae_path).resolve()
     rnn_dir = Path(rnn_path).resolve()
@@ -145,7 +145,9 @@ def main(
     if actions.ndim != 3 or actions.shape[-1] != 3:
         raise ValueError("dataset actions must have shape [E, T, 3]")
     if actions.shape[0] != observations.shape[0]:
-        raise ValueError("dataset observations and actions must have equal episode counts")
+        raise ValueError(
+            "dataset observations and actions must have equal episode counts"
+        )
     num_episodes = observations.shape[0]
     if episode is not None and episode >= num_episodes:
         raise ValueError(f"episode must be less than {num_episodes}")
@@ -200,14 +202,14 @@ def main(
                         paused = not paused
                     elif event.key == pygame.K_PERIOD and paused:
                         single_step = True
-                    elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
-                        temperature = adjust_temperature(
-                            temperature, TEMPERATURE_STEP
-                        )
+                    elif event.key in (
+                        pygame.K_PLUS,
+                        pygame.K_EQUALS,
+                        pygame.K_KP_PLUS,
+                    ):
+                        temperature = adjust_temperature(temperature, TEMPERATURE_STEP)
                     elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
-                        temperature = adjust_temperature(
-                            temperature, -TEMPERATURE_STEP
-                        )
+                        temperature = adjust_temperature(temperature, -TEMPERATURE_STEP)
                     elif event.key == pygame.K_r:
                         latent, carry, rollout_key, frame = reset(selection)
                         step = 0

@@ -64,7 +64,7 @@ def main(
     seed: int = 0,
     worker_count: int = 0,
     learning_rate: float = 2e-3,
-    initializer_stddev: float = 1e-4,
+    lr_min_mult: float = 1e-2,
 ) -> None:
     source = RNNSource(data_dir, vae_name)
     loader = get_rnn_dataloader(
@@ -79,19 +79,19 @@ def main(
     model = RNN(
         latent_dim=source.latent_dim,
         action_dim=source.action_dim,
-        initializer_stddev=initializer_stddev,
         rngs=nnx.Rngs(seed),
+    )
+    num_steps = len(source) // batch_size * num_epochs
+
+    lr_schedule = optax.cosine_decay_schedule(
+        init_value=learning_rate, decay_steps=num_steps, alpha=lr_min_mult
     )
     tx = optax.chain(
         optax.clip_by_global_norm(1.0),
-        optax.adamw(learning_rate),
+        optax.adamw(lr_schedule),
     )
     optim = nnx.Optimizer(model, tx, wrt=nnx.Param)
     latent_rngs = nnx.Rngs(seed)
-
-    num_steps = len(source) // batch_size * num_epochs
-    if num_steps == 0:
-        raise ValueError("batch_size is larger than the number of episodes")
 
     losses: list[float] = []
     progress = tqdm(loader, total=num_steps, desc="Training RNN")
@@ -101,7 +101,7 @@ def main(
         losses.append(loss_value)
         progress.set_postfix(loss=f"{loss_value:.3f}")
 
-    output = Path(output_path).resolve()
+    output = Path(output_path).resolve() / vae_name
     output.parent.mkdir(parents=True, exist_ok=True)
     _, state = nnx.split(model)
     with ocp.StandardCheckpointer() as checkpointer:

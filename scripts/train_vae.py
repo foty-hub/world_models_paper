@@ -28,11 +28,11 @@ def plot_reconstruction(
     fp.parent.mkdir(parents=True, exist_ok=True)
 
     n_plots = min(n_plots, x.shape[0])
-    x = x[:n_plots]
-    x_pred = model(x)  # type: ignore
+    x_array = jnp.asarray(x[:n_plots])
+    x_pred = model.decode(model.encode(x_array).mu)
 
-    x = unnormalise_obs(np.clip(np.asarray(x), -1.0, 1.0))  # type: ignore
-    x_pred = unnormalise_obs(np.clip(np.asarray(x_pred), -1.0, 1.0))
+    x = unnormalise_obs(np.clip(np.asarray(x_array), 0.0, 1.0))  # type: ignore
+    x_pred = unnormalise_obs(np.clip(np.asarray(x_pred), 0.0, 1.0))
 
     fig, axes = plt.subplots(n_plots, 2, figsize=(4, 2 * n_plots), squeeze=False)
     for i in range(n_plots):
@@ -213,7 +213,7 @@ def main(
     learning_rate: float = 8e-4,
     log_every: int = 500,
     ckpt_every: int = 1_000,
-    data_dir: str = "data/vae",
+    data_dir: str = "data/random_data",
     experiments_dir: str = "experiments",
     max_checkpoints_to_keep: int | None = 3,
 ):
@@ -221,7 +221,7 @@ def main(
     print("Config:")
     pprint(config, sort_dicts=False)
 
-    run_dir = Path(experiments_dir) / run_name
+    run_dir = Path(experiments_dir) / "vae" / run_name
     run_dir = run_dir.resolve()
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -250,7 +250,6 @@ def main(
         model = VAE(
             latent_dim=latent_dim,
             rngs=nnx.Rngs(seed),
-            initializer_stddev=0.0001,
             beta=vae_beta,
         )
 
