@@ -1,0 +1,33 @@
+# styles/paper.mplstyle
+
+font.family: DRAFT PAPER
+
+mathtext.fontset: custom
+mathtext.rm: TeX Gyre DejaVu Math
+mathtext.it: TeX Gyre DejaVu Math
+mathtext.bf: TeX Gyre DejaVu Math
+mathtext.sf: TeX Gyre DejaVu Math
+mathtext.tt: TeX Gyre DejaVu Math
+mathtext.cal: TeX Gyre DejaVu Math
+mathtext.fallback: stix
+
+text.color: 2B2627
+
+axes.labelcolor: 2B2627
+axes.edgecolor: 2B2627
+axes.spines.top: False
+axes.spines.right: False
+axes.labelpad: 10
+axes.unicode_minus: False
+axes.formatter.min_exponent: 5
+
+xtick.color: 2B2627
+ytick.color: 2B2627
+
+legend.frameon: False
+
+
+savefig.dpi: 300
+savefig.bbox: tight
+
+axes.prop_cycle: cycler('color', ['489299', 'C34832'])
