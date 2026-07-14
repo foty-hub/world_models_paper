@@ -15,7 +15,7 @@ Here's an evolved policy solving the CarRacing environment - achieving 906 rewar
 
 It's a bit wonky, with the car oscillating from side-to-side, which I reckon is for two reasons:
 1. Data collection via random initialisation doesn't cover that much of the policy space, so most of the random data collection looks like sticky actions: the car either drives forwards, sits still, or spins left/right. That means the VAE doesn't learn to distinguish road position very well and the signal for the policy is limited. To be fair the policy does fairly well (IQM 850 reward - see `notebooks/train_controller.ipynb`), so I'm not sure whether the oscillation is harming performance that much.
-2. The paper uses an evolutionary method called CMA-ES to train the car driving controller. This is horribly slow, and it's all CPU-bound because the CarRacing environment uses Box2D. I used something like 20x less compute for this final optimisation step than the original paper, so the controller is pretty suboptimal.
+2. The paper uses an evolutionary method called CMA-ES to train the car driving controller. This is horribly slow, and it's all CPU-bound because the CarRacing environment uses Box2D. I used something like 25x less compute (which still took 8 hours on a 16-core machine) for this final optimisation step than the original paper, so the controller is pretty suboptimal.
 
 ## How to Run It
 There are a few steps to the paper. You need to:
