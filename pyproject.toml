@@ -24,6 +24,7 @@ dependencies = [
     "pillow>=12.2.0",
     "pygame-ce>=2.5.7",
     "pytest>=9.1.1",
+    "rliable>=1.2.0",
     "swig>=4.4.1",
     "tqdm>=4.68.2",
     "types-tqdm>=4.68.0.20260608",
