@@ -14,7 +14,7 @@ Here's an evolved policy solving the CarRacing environment - achieving 906 rewar
 [![Evolved policy solving the CarRacing environment](assets/policy.gif)](assets/policy.mp4)
 
 It's a bit wonky, with the car oscillating from side-to-side, which I reckon is for two reasons:
-1. Data collection via random initialisation doesn't cover that much of the policy space, so most of the random data collection looks like sticky actions: the car either drives forwards, sits still, or spins left/right. That means the VAE doesn't learn to distinguish road position very well. That means the signal for the policy is limited (and to be fair I'm not sure it's reducing the reward much given the agent solves the environment).
+1. Data collection via random initialisation doesn't cover that much of the policy space, so most of the random data collection looks like sticky actions: the car either drives forwards, sits still, or spins left/right. That means the VAE doesn't learn to distinguish road position very well and the signal for the policy is limited. To be fair the policy does fairly well (IQM 850 reward - see `notebooks/train_controller.ipynb`), so I'm not sure whether the oscillation is harming performance that much.
 2. The paper uses an evolutionary method called CMA-ES to train the car driving controller. This is horribly slow, and it's all CPU-bound because the CarRacing environment uses Box2D. I used something like 20x less compute for this final optimisation step than the original paper, so the controller is pretty suboptimal.
 
 ## How to Run It
@@ -49,4 +49,12 @@ You can also interact with the world model yourself by running
 
 ```bash
 uv run scripts/imagine.py
+```
+
+
+
+# Tests
+To run tests, from root run
+```bash
+uv run pytest
 ```
