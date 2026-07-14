@@ -22,10 +22,10 @@ There are a few steps to the paper. You need to:
 3. Train an RNN to predict trajectories in the VAE latent space
 4. Train a controller which only receives the RNN hidden state and VAE latent as inputs, to control the car.
 
-In this repo, these are done by:
+In this repo, these are individually done by:
 ```bash
 uv run scripts/collect_data.py
 uv run scripts/train_vae.py
 uv run scripts/train_rnn.py
-uv run scripts/collect_data.py
+uv run scripts/train_controller.py
 ```
